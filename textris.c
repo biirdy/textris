@@ -33,8 +33,6 @@ typedef struct{
 	bucket * bucket;
 } thread_params;
 
-
-
 typedef int *(*fptr)(int i, int j);
 
 //TODO: add point of rotation - may need to increase resolution
@@ -47,8 +45,6 @@ char shape_bytes[7][4] = {
 	{0b00000000, 0b00000011, 0b00000110, 0b00000000}, // z - reverse
 	{0b00000000, 0b00000110, 0b00000110, 0b00000000}  // square 
 };
-
-
 
 int DEBUG_CNT = 0;
 
@@ -207,10 +203,32 @@ void refill_bucket(bucket * b){
 		b->bucket1[i+7] = *(b1 + i);
 }
 
+void clear_bucket(){
+
+	int i, j;
+	
+	for(i = 0; i < 7; i++){
+		for(j=0; j<4; j++){
+			mvprintw(i*4 + j, 20 * 2 + 1, "        ");	
+		}	
+	}
+}
+
 void draw_bucket(bucket * b){
 	int i;
-	for(i =0; i<14; i++){
-		mvprintw(0 + i, 40, "%d Bucket %d type %d       ", i, i/7 + 1, b->bucket1[i]);
+	int y = 0;
+
+	for(i =0; i<7; i++){
+
+		shape s;
+		s.rotation = 0;
+		s.type = b->bucket1[i];
+		s.x = 20;
+		s.y = y;
+
+		y += 4;
+
+		draw_shape(s);
 	}
 }
 
@@ -230,6 +248,7 @@ void new_shape(shape * s, bucket * b){
 		b->bucket1[i] = b->bucket1[i+1];
 	b->bucket1[13] = -1;
 
+	clear_bucket();
 	draw_bucket(b);
 }
 
@@ -279,22 +298,20 @@ void drop_loop(void * tp_void_ptr){
 				break;
 			}
 
-			
-
 			int clears = check_lines(tp_ptr->b);
 			if(clears > 0){
 				mvprintw(40 + DEBUG_CNT++, 0, "Cleared lines %d", clears);
 			}
 
 			new_shape(tp_ptr->s, tp_ptr->bucket);
-			
-
 		}
 
+		//need method of changing this value as levels increase
 		usleep(250000);		//100ms
 	}
 }
 
+//TODO - add animation to this?
 void clear_line(board * b, int y){
 
 	int x, shuffle_y;
@@ -374,6 +391,7 @@ int main(){
     pthread_create(&pth, NULL, drop_loop, (void * ) &tp);
 
 	// game loop
+	// TODO - add DAS
 	while(1){
 
 		int ch = getch();
