@@ -31,22 +31,34 @@ typedef struct{
 	shape * s;
 	board * b;
 	bucket * bucket;
+	int * hold_cnt;
+	int * drop_speed;
 } thread_params;
 
 typedef int *(*fptr)(int i, int j);
 
 //TODO: add point of rotation - may need to increase resolution
 char shape_bytes[7][4] = {
-	{0b00000000, 0b00000000, 0b00000000, 0b00001111}, 	// i
+	{0b00000000, 0b00000000, 0b00001111, 0b00000000}, 	// i
 	{0b00000000, 0b00000100, 0b00001110, 0b00000000}, 	// t
-	{0b00000000, 0b00001000, 0b00001000, 0b00001100}, 	// l
-	{0b00000000, 0b00000001, 0b00000001, 0b00000011}, 	// l - reverse
+	{0b00000000, 0b00001110, 0b00001000, 0b00000000}, 	// l
+	{0b00000000, 0b00001110, 0b00000010, 0b00000000}, 	// l - reverse
 	{0b00000000, 0b00001100, 0b00000110, 0b00000000}, 	// z
-	{0b00000000, 0b00000011, 0b00000110, 0b00000000}, // z - reverse
-	{0b00000000, 0b00000110, 0b00000110, 0b00000000}  // square 
+	{0b00000000, 0b00000011, 0b00000110, 0b00000000}, 	// z - reverse
+	{0b00000000, 0b00000110, 0b00000110, 0b00000000}  	// square 
 };
 
 int DEBUG_CNT = 0;
+
+int X_OFFSET = 10;
+int Y_OFFSET = 1;
+int X_WIDTH = 10;
+int Y_HEIGHT = 20;
+
+int BUCKET_OFFSET = 4;
+int HOLD_OFFSET = -6;
+
+shape s;
 
 /*
 * Given the loop itterator values(i , j)
@@ -85,13 +97,44 @@ fptr get_map_func(shape s, int direction){
 		return map_rotation3;
 }
 
+int in_array(int val, int * arr, int size){
 
+	int i;
 
-void draw_shape(shape s){
+	for(i=0; i<size; i++){
+		if(arr[i] == val)
+			return 1;
+	}
+	return 0;
+}
+
+void v_border(int y, int x, int len){
+	int i;
+	for(i = 1; i < len - 1; i++)
+		mvprintw(y + i, x, "|");		
+	mvprintw(y, x, "+");
+	mvprintw(y + len - 1, x, "+");
+	
+}
+
+void h_border(int y, int x, int len){
+	char * str = malloc(len + 1);
+	str[0] = '+';
+	memset(str + 1, '-', len - 2);
+	str[len - 1] = '+';
+	str[len] = 0;
+
+	mvprintw(y, x, str);
+}
+
+int draw_shape(shape s){
 
 	int i, j;
 	int * map;
 	int * (*map_func)(int i, int j) = get_map_func(s, 0);
+
+	int y_vals[4];
+	int height = 0;
 
 	attron(COLOR_PAIR(s.type+1));
 
@@ -100,13 +143,21 @@ void draw_shape(shape s){
 			map = map_func(i , j);
 
 			if(CHECK_BIT(shape_bytes[s.type][BYTE_MAP(map)], BIT_MAP(map))){
-				mvaddch(s.y + Y_MAP(map), (s.x + X_MAP(map)) * 2 + 1,  ' '|A_REVERSE);
-				mvaddch(s.y + Y_MAP(map), (s.x + X_MAP(map)) * 2 + 2,  ' '|A_REVERSE);
+
+				mvaddch(s.y + Y_MAP(map) + Y_OFFSET, ((s.x + X_MAP(map))*2)  + (X_OFFSET*2) + 1,  ' '|A_REVERSE);
+				mvaddch(s.y + Y_MAP(map) + Y_OFFSET, ((s.x + X_MAP(map))*2) + (X_OFFSET*2) + 2,  ' '|A_REVERSE);
+
+				if(!in_array(s.y + Y_MAP(map), y_vals, 4)){
+					y_vals[height] = s.y + Y_MAP(map);
+					height++;
+				}
 			}
 			
 		}
 	}
 	attroff(COLOR_PAIR(s.type+1));
+
+	return height;
 }
 
 void draw_board(board b){
@@ -116,11 +167,11 @@ void draw_board(board b){
 	for(x = 0; x < 10; x++){
 		for(y = 0; y < 20; y++){
 			if(b.xy[x][y] == 0){
-				mvprintw(y, (x*2)+1, "  ");
+				mvprintw(y + Y_OFFSET, (x*2) + (X_OFFSET*2) + 1, "  ");
 			}else{
 				attron(COLOR_PAIR(b.xy[x][y]));
-				mvaddch(y, (x*2) + 1, ' '|A_REVERSE);
-				mvaddch(y, (x*2) + 2, ' '|A_REVERSE);
+				mvaddch(y + Y_OFFSET, (x*2) + (X_OFFSET*2) + 1, ' '|A_REVERSE);
+				mvaddch(y + Y_OFFSET, (x*2) + (X_OFFSET*2) + 2, ' '|A_REVERSE);
 				attroff(COLOR_PAIR(b.xy[x][y]));
 			}
 		}
@@ -149,9 +200,9 @@ int check_move(shape s, board b, int x_direction, int y_direction, int rotation)
 
 				//check board boundaries
 				if(	(s.x + X_MAP(map) + x_direction) < 0 || 
-					(s.x + X_MAP(map) + x_direction) > 9 ||
+					(s.x + X_MAP(map) + x_direction) > (X_WIDTH - 1) ||
 					(s.y + Y_MAP(map) + y_direction) < 0 ||
-					(s.y + Y_MAP(map) + y_direction) > 19){
+					(s.y + Y_MAP(map) + y_direction) > (Y_HEIGHT - 1)){
 					return 0;
 				}
 
@@ -203,33 +254,35 @@ void refill_bucket(bucket * b){
 		b->bucket1[i+7] = *(b1 + i);
 }
 
-void clear_bucket(){
-
+//TODO - eliminate most white space - only a single block between shapes 
+//     - maybe rotate them differently
+void draw_bucket(bucket * b){
+	
 	int i, j;
 	
-	for(i = 0; i < 7; i++){
+	//clear
+	for(i = 0; i < 4; i++){
 		for(j=0; j<4; j++){
-			mvprintw(i*4 + j, 20 * 2 + 1, "        ");	
+			mvprintw(i*4 + j, (X_WIDTH * 2) + (X_OFFSET * 2) + (BUCKET_OFFSET * 2) + 1, "        ");	
 		}	
 	}
-}
 
-void draw_bucket(bucket * b){
-	int i;
-	int y = 0;
-
-	for(i =0; i<7; i++){
+	for(i =0; i<4; i++){
 
 		shape s;
 		s.rotation = 0;
 		s.type = b->bucket1[i];
-		s.x = 20;
-		s.y = y;
-
-		y += 4;
+		s.x = X_WIDTH + BUCKET_OFFSET;
+		s.y = i*4;
 
 		draw_shape(s);
 	}
+
+	//borders
+        v_border(Y_OFFSET, (X_OFFSET * 2) + (X_WIDTH * 2) + (BUCKET_OFFSET * 2) - 1, 4 * 4);
+        v_border(Y_OFFSET, (X_OFFSET * 2) + (X_WIDTH * 2) + (BUCKET_OFFSET * 2) + 10, 4 * 4);
+        h_border(Y_OFFSET, (X_OFFSET * 2) + (X_WIDTH * 2) + (BUCKET_OFFSET * 2) - 1, 12);
+        h_border(Y_OFFSET + (4 * 4) - 1, (X_OFFSET * 2) + (X_WIDTH * 2) + (BUCKET_OFFSET * 2) - 1, 12);
 }
 
 void new_shape(shape * s, bucket * b){
@@ -248,8 +301,7 @@ void new_shape(shape * s, bucket * b){
 		b->bucket1[i] = b->bucket1[i+1];
 	b->bucket1[13] = -1;
 
-	clear_bucket();
-	draw_bucket(b);
+	//draw_bucket(b);
 }
 
 int add_to_board(shape s, board * b){
@@ -304,10 +356,12 @@ void drop_loop(void * tp_void_ptr){
 			}
 
 			new_shape(tp_ptr->s, tp_ptr->bucket);
+
+			* tp_ptr->hold_cnt = 0;
 		}
 
 		//need method of changing this value as levels increase
-		usleep(250000);		//100ms
+		usleep(* tp_ptr->drop_speed);		//100ms
 	}
 }
 
@@ -342,7 +396,67 @@ int check_lines(board * b){
 	return row_cnt;
 }
 
+void draw_hold(int h_s, int hold_cnt){
+
+	int j;
+	
+	h_border(Y_OFFSET - 1, (X_OFFSET * 2) + (HOLD_OFFSET * 2), 10);
+	h_border(Y_OFFSET + 4, (X_OFFSET * 2) + (HOLD_OFFSET * 2), 10);
+	v_border(Y_OFFSET - 1, (X_OFFSET * 2) + (HOLD_OFFSET * 2), 6);
+	v_border(Y_OFFSET - 1, (X_OFFSET * 2) + (HOLD_OFFSET * 2) + 9, 6);
+
+	//clear
+	for(j=0; j<4; j++)
+		mvprintw(j + Y_OFFSET, (X_OFFSET * 2) + (HOLD_OFFSET * 2) + 1, "        ");	
+
+	if(h_s != -1){
+		shape s;
+		s.type = h_s;
+		s.rotation = 0;
+		s.x = HOLD_OFFSET;
+		s.y = 0;
+
+		draw_shape(s);
+	}
+}
+
+void hold(shape * s, int * h_s, bucket * b){
+
+	//hold empty
+	if(* h_s == -1){
+		* h_s = s->type;
+		int x = s->x;
+		int y = s->y;
+
+		new_shape(s, b); 
+		s->x = x;
+		s->y = y;
+	//swap
+	}else{
+		int type = s->type;
+		s->type = * h_s;
+		* h_s = type;
+	}
+
+}
+
+int can_hold(shape s, shape h_s, board b){
+	return 1;
+}
+
+void test_func(){
+	mvprintw(40 + DEBUG_CNT++, 0, "TEST");
+}
+
+void shape_left(){
+	s.x--;
+}	
+
 int main(){  
+
+	int hold_cnt = 0;
+	int score = 0;
+	int drop_speed = 250000;
 
 	srand(time(NULL));
 
@@ -352,6 +466,7 @@ int main(){
 	cbreak();
 	noecho();
 	halfdelay(1);
+	//nodelay(stdscr, TRUE);
 	keypad(stdscr, TRUE);
 
 	start_color();
@@ -365,20 +480,25 @@ int main(){
 	
 	//initialise boarders
 	int i;
-	for(i = 0; i < 20; i++){
-		mvprintw(i,0,"|");
-		mvprintw(i,21,"| %d", i);
+	for(i = 0; i < Y_HEIGHT; i++){
+		mvprintw(i + Y_OFFSET, (X_OFFSET * 2), "|");
+		mvprintw(i + Y_OFFSET, (X_WIDTH * 2) + (X_OFFSET * 2) + 1, "| %d", i);
 	}
 
-	for(i = 0; i < 21; i++){
-		mvprintw(20,i,"_");	
+	for(i = 0; i < (X_WIDTH * 2) + 1; i++){
+		mvprintw(Y_OFFSET + Y_HEIGHT, i + (X_OFFSET*2), "_");	
 	}
+
+	mvprintw(Y_OFFSET + Y_HEIGHT, X_OFFSET*2, "+--------------------+");	
 
 	bucket bu;
 	init_bucket(&bu);
 
-	shape s;
+	
 	new_shape(&s, &bu);
+
+	//hold shape
+	int h_s = -1;
 
 	board b = init_board();
 
@@ -386,6 +506,8 @@ int main(){
 	tp.b = &b;
 	tp.s = &s;
 	tp.bucket = &bu;
+	tp.hold_cnt = &hold_cnt;
+	tp.drop_speed = &drop_speed;
 
 	pthread_t pth;
     pthread_create(&pth, NULL, drop_loop, (void * ) &tp);
@@ -394,14 +516,15 @@ int main(){
 	// TODO - add DAS
 	while(1){
 
+		timeout(100);
 		int ch = getch();
 
 		draw_board(b);
 		
-		if(ch){
+		if(ch != ERR){
 
 			//hold - temporarily cycles trough
-			if(ch == KEY_UP){
+			if(ch == 'x'){
 				s.type++;
 				if(s.type == 7)
 					s.type = 0;
@@ -415,7 +538,7 @@ int main(){
 				s.x++;
 
 			//rotate
-			}else if(ch == KEY_DOWN && check_move(s, b, 0, 0, 1)){
+			}else if(ch == KEY_UP && check_move(s, b, 0, 0, 1)){
 				s.rotation++;
 				if(s.rotation == 4)
 					s.rotation = 0;
@@ -427,13 +550,155 @@ int main(){
 						break;
 					s.y++;
 				}
+			//hold
+			}else if(ch == 'z' && hold_cnt < 1){
+				hold(&s, &h_s, &bu);
+				hold_cnt++;
+			//soft drop
+			}else if(ch == KEY_DOWN){
+				drop_speed = 100000;
+			}else{
+				drop_speed = 250000;
 			}
 		}
 
+		draw_hold(h_s, hold_cnt);
+
 		draw_shape(s);
+		draw_bucket(&bu);
 
 		mvprintw(30, 2, "X %d\n", s.x);
 		mvprintw(31, 2, "Y %d\n", s.y);
+
+		refresh();
+
+		if(DEBUG_CNT == 20)
+			DEBUG_CNT = 0;
+	}
+
+	while(1){
+		refresh();
+	}
+
+	endwin();
+}
+
+void start(){
+	int hold_cnt = 0;
+	int score = 0;
+	int drop_speed = 250000;
+
+	srand(time(NULL));
+
+	setlocale(LC_ALL, "");
+
+	initscr();			
+	cbreak();
+	noecho();
+	halfdelay(1);
+	//nodelay(stdscr, TRUE);
+	keypad(stdscr, TRUE);
+
+	start_color();
+	init_pair(1, COLOR_RED, COLOR_BLACK);
+	init_pair(2, COLOR_YELLOW, COLOR_BLACK);
+	init_pair(3, COLOR_BLUE, COLOR_BLACK);
+	init_pair(4, COLOR_GREEN, COLOR_BLACK);
+	init_pair(5, COLOR_WHITE, COLOR_BLACK);
+	init_pair(6, COLOR_CYAN, COLOR_BLACK);
+	init_pair(7, COLOR_MAGENTA, COLOR_BLACK);
+	
+	//initialise boarders
+	int i;
+	for(i = 0; i < Y_HEIGHT; i++){
+		mvprintw(i + Y_OFFSET, (X_OFFSET * 2), "|");
+		mvprintw(i + Y_OFFSET, (X_WIDTH * 2) + (X_OFFSET * 2) + 1, "| %d", i);
+	}
+
+	for(i = 0; i < (X_WIDTH * 2) + 1; i++){
+		mvprintw(Y_OFFSET + Y_HEIGHT, i + (X_OFFSET*2), "_");	
+	}
+
+	mvprintw(Y_OFFSET + Y_HEIGHT, X_OFFSET*2, "+--------------------+");	
+
+	bucket bu;
+	init_bucket(&bu);
+
+	//shape s;
+	new_shape(&s, &bu);
+
+	//hold shape
+	int h_s = -1;
+
+	board b = init_board();
+
+	thread_params tp;
+	tp.b = &b;
+	tp.s = &s;
+	tp.bucket = &bu;
+	tp.hold_cnt = &hold_cnt;
+	tp.drop_speed = &drop_speed;
+
+	pthread_t pth;
+    pthread_create(&pth, NULL, drop_loop, (void * ) &tp);
+
+	// game loop
+	// TODO - add DAS
+	while(1){
+
+		timeout(100);
+		int ch = getch();
+
+		draw_board(b);
+		
+		if(ch != ERR){
+
+			//hold - temporarily cycles trough
+			if(ch == 'x'){
+				s.type++;
+				if(s.type == 7)
+					s.type = 0;
+
+			//left
+			}else if(ch == KEY_LEFT && check_move(s, b, -1, 0, 0)){
+				s.x--;
+
+			//right
+			}else if(ch == KEY_RIGHT && check_move(s, b, 1, 0, 0)){
+				s.x++;
+
+			//rotate
+			}else if(ch == KEY_UP && check_move(s, b, 0, 0, 1)){
+				s.rotation++;
+				if(s.rotation == 4)
+					s.rotation = 0;
+
+			//hard drop
+			}else if(ch == ' '){
+				while(true){
+					if(!check_move(s, b, 0, 1, 0))
+						break;
+					s.y++;
+				}
+			//hold
+			}else if(ch == 'z' && hold_cnt < 1){
+				hold(&s, &h_s, &bu);
+				hold_cnt++;
+			//soft drop
+			}else if(ch == KEY_DOWN){
+				drop_speed = 100000;
+			}else{
+				drop_speed = 250000;
+			}
+		}
+
+		draw_hold(h_s, hold_cnt);
+
+		draw_shape(s);
+		draw_bucket(&bu);
+
+		//mvprintw(30, 2, "X %d\n", s.x);
+		//mvprintw(31, 2, "Y %d\n", s.y);
 
 		refresh();
 
