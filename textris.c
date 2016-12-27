@@ -3,6 +3,7 @@
 #include <locale.h>
 #include <string.h>
 #include <pthread.h>
+#include <time.h>
 
 #define CHECK_BIT(var,pos) ((var) & (1<<(pos)))
 #define BIT_MAP(map)(*(map + 0))
@@ -33,6 +34,8 @@ typedef struct{
 	bucket * bucket;
 	int * hold_cnt;
 	int * drop_speed;
+	int * running;
+	int * lines_cleared;
 } thread_params;
 
 typedef int *(*fptr)(int i, int j);
@@ -58,7 +61,20 @@ int Y_HEIGHT = 20;
 int BUCKET_OFFSET = 4;
 int HOLD_OFFSET = -6;
 
+//active shape
 shape s;
+
+//board
+board b;
+
+//shape bucket
+bucket bu;
+
+//hold
+int h_s = -1;
+int hold_cnt = 0;
+
+int drop_speed = 250000;
 
 /*
 * Given the loop itterator values(i , j)
@@ -339,14 +355,14 @@ board init_board(){
 void drop_loop(void * tp_void_ptr){
 	thread_params * tp_ptr = (thread_params *) tp_void_ptr;
 
-	while(1){
+	while(* tp_ptr->running > 0){
 
 		if(check_move(*tp_ptr->s, *tp_ptr->b, 0, 1, 0)){
 			tp_ptr->s->y++; 
 		}else{
 
 			if(add_to_board(*tp_ptr->s, tp_ptr->b) <= 0){
-				mvprintw(40 + DEBUG_CNT++, 0, "GAME OVER");
+				* tp_ptr->running = -1;
 				break;
 			}
 
@@ -354,6 +370,8 @@ void drop_loop(void * tp_void_ptr){
 			if(clears > 0){
 				mvprintw(40 + DEBUG_CNT++, 0, "Cleared lines %d", clears);
 			}
+
+			* tp_ptr->lines_cleared = * tp_ptr->lines_cleared + clears;
 
 			new_shape(tp_ptr->s, tp_ptr->bucket);
 
@@ -449,78 +467,155 @@ void test_func(){
 }
 
 void shape_left(){
-	s.x--;
+	if(check_move(s, b, -1, 0, 0))
+		s.x--;
 }	
 
+void shape_right(){
+	if(check_move(s, b, 1, 0, 0))
+		s.x++;
+}
+
+void shape_rotate(){
+	if(check_move(s, b, 0, 0, 1)){
+		s.rotation++;
+		if(s.rotation == 4){
+			s.rotation = 0;
+		}
+	}
+}
+
+void shape_hard_drop(){
+	while(true){
+		if(!check_move(s, b, 0, 1, 0))
+			break;
+		s.y++;
+	}
+}
+
+void shape_hold(){
+	if(hold_cnt < 1){
+		hold(&s, &h_s, &bu);
+		hold_cnt++;
+	}
+}
+
+void drop_speed_normal(){
+	drop_speed = 250000;
+}
+
+void drop_speed_fast(){
+	drop_speed = 50000;
+}
+
+double twenty_lines(){
+	//initialise boarders
+	int i;
+	for(i = 0; i < Y_HEIGHT; i++){
+		mvprintw(i + Y_OFFSET, (X_OFFSET * 2), "|");
+		mvprintw(i + Y_OFFSET, (X_WIDTH * 2) + (X_OFFSET * 2) + 1, "| %d", i);
+	}
+
+	for(i = 0; i < (X_WIDTH * 2) + 1; i++){
+		mvprintw(Y_OFFSET + Y_HEIGHT, i + (X_OFFSET*2), "_");	
+	}
+
+	mvprintw(Y_OFFSET + Y_HEIGHT, X_OFFSET*2, "+--------------------+");	
+
+	//bucket
+	init_bucket(&bu);
+
+	//shape
+	new_shape(&s, &bu);
+
+	//board
+	b = init_board();
+
+	int running = 1;
+	int lines = 0;
+
+	//drop loop params
+	thread_params tp;
+	tp.b = &b;
+	tp.s = &s;
+	tp.bucket = &bu;
+	tp.hold_cnt = &hold_cnt;
+	tp.drop_speed = &drop_speed;
+	tp.running = &running; 
+	tp.lines_cleared = &lines;
+
+	pthread_t pth;
+    pthread_create(&pth, NULL, drop_loop, (void * ) &tp);
+
+    time_t start = time(NULL);
+
+	// game loop
+	while(running > 0 && lines < 4){
+
+		timeout(100);
+
+		draw_board(b);
+		draw_hold(h_s, hold_cnt);
+		draw_shape(s);
+		draw_bucket(&bu);
+
+		refresh();
+
+		if(DEBUG_CNT == 20)
+			DEBUG_CNT = 0;
+	}
+
+	//stop drop loop
+	running = -1;
+
+	//delay for drop loop to stop
+	usleep(1000000);
+
+	clear();
+
+	return difftime(time(NULL), start);
+}
+
+void textris(){
+	int score = 0;
+
+	srand(time(NULL));
+
+	setlocale(LC_ALL, "");
+
+	initscr();			
+	cbreak();
+	noecho();
+	halfdelay(1);
+	keypad(stdscr, TRUE);
+
+	start_color();
+	init_pair(1, COLOR_RED, COLOR_BLACK);
+	init_pair(2, COLOR_YELLOW, COLOR_BLACK);
+	init_pair(3, COLOR_BLUE, COLOR_BLACK);
+	init_pair(4, COLOR_GREEN, COLOR_BLACK);
+	init_pair(5, COLOR_WHITE, COLOR_BLACK);
+	init_pair(6, COLOR_CYAN, COLOR_BLACK);
+	init_pair(7, COLOR_MAGENTA, COLOR_BLACK);
+
+	//menu goes here - need to control via python too ??
+
+	double res = twenty_lines();
+
+	while(1){
+		mvprintw(0, 0, "20 lines cleared in %f seconds", res);
+		refresh();
+	}
+
+	endwin();
+}
+
 int main(){  
+	textris();
+}
 
-	int hold_cnt = 0;
-	int score = 0;
-	int drop_speed = 250000;
-
-	srand(time(NULL));
-
-	setlocale(LC_ALL, "");
-
-	initscr();			
-	cbreak();
-	noecho();
-	halfdelay(1);
-	//nodelay(stdscr, TRUE);
-	keypad(stdscr, TRUE);
-
-	start_color();
-	init_pair(1, COLOR_RED, COLOR_BLACK);
-	init_pair(2, COLOR_YELLOW, COLOR_BLACK);
-	init_pair(3, COLOR_BLUE, COLOR_BLACK);
-	init_pair(4, COLOR_GREEN, COLOR_BLACK);
-	init_pair(5, COLOR_WHITE, COLOR_BLACK);
-	init_pair(6, COLOR_CYAN, COLOR_BLACK);
-	init_pair(7, COLOR_MAGENTA, COLOR_BLACK);
-	
-	//initialise boarders
-	int i;
-	for(i = 0; i < Y_HEIGHT; i++){
-		mvprintw(i + Y_OFFSET, (X_OFFSET * 2), "|");
-		mvprintw(i + Y_OFFSET, (X_WIDTH * 2) + (X_OFFSET * 2) + 1, "| %d", i);
-	}
-
-	for(i = 0; i < (X_WIDTH * 2) + 1; i++){
-		mvprintw(Y_OFFSET + Y_HEIGHT, i + (X_OFFSET*2), "_");	
-	}
-
-	mvprintw(Y_OFFSET + Y_HEIGHT, X_OFFSET*2, "+--------------------+");	
-
-	bucket bu;
-	init_bucket(&bu);
-
-	
-	new_shape(&s, &bu);
-
-	//hold shape
-	int h_s = -1;
-
-	board b = init_board();
-
-	thread_params tp;
-	tp.b = &b;
-	tp.s = &s;
-	tp.bucket = &bu;
-	tp.hold_cnt = &hold_cnt;
-	tp.drop_speed = &drop_speed;
-
-	pthread_t pth;
-    pthread_create(&pth, NULL, drop_loop, (void * ) &tp);
-
-	// game loop
-	// TODO - add DAS
-	while(1){
-
-		timeout(100);
+		/*
 		int ch = getch();
-
-		draw_board(b);
-		
 		if(ch != ERR){
 
 			//hold - temporarily cycles trough
@@ -554,161 +649,5 @@ int main(){
 			}else if(ch == 'z' && hold_cnt < 1){
 				hold(&s, &h_s, &bu);
 				hold_cnt++;
-			//soft drop
-			}else if(ch == KEY_DOWN){
-				drop_speed = 100000;
-			}else{
-				drop_speed = 250000;
 			}
-		}
-
-		draw_hold(h_s, hold_cnt);
-
-		draw_shape(s);
-		draw_bucket(&bu);
-
-		mvprintw(30, 2, "X %d\n", s.x);
-		mvprintw(31, 2, "Y %d\n", s.y);
-
-		refresh();
-
-		if(DEBUG_CNT == 20)
-			DEBUG_CNT = 0;
-	}
-
-	while(1){
-		refresh();
-	}
-
-	endwin();
-}
-
-void start(){
-	int hold_cnt = 0;
-	int score = 0;
-	int drop_speed = 250000;
-
-	srand(time(NULL));
-
-	setlocale(LC_ALL, "");
-
-	initscr();			
-	cbreak();
-	noecho();
-	halfdelay(1);
-	//nodelay(stdscr, TRUE);
-	keypad(stdscr, TRUE);
-
-	start_color();
-	init_pair(1, COLOR_RED, COLOR_BLACK);
-	init_pair(2, COLOR_YELLOW, COLOR_BLACK);
-	init_pair(3, COLOR_BLUE, COLOR_BLACK);
-	init_pair(4, COLOR_GREEN, COLOR_BLACK);
-	init_pair(5, COLOR_WHITE, COLOR_BLACK);
-	init_pair(6, COLOR_CYAN, COLOR_BLACK);
-	init_pair(7, COLOR_MAGENTA, COLOR_BLACK);
-	
-	//initialise boarders
-	int i;
-	for(i = 0; i < Y_HEIGHT; i++){
-		mvprintw(i + Y_OFFSET, (X_OFFSET * 2), "|");
-		mvprintw(i + Y_OFFSET, (X_WIDTH * 2) + (X_OFFSET * 2) + 1, "| %d", i);
-	}
-
-	for(i = 0; i < (X_WIDTH * 2) + 1; i++){
-		mvprintw(Y_OFFSET + Y_HEIGHT, i + (X_OFFSET*2), "_");	
-	}
-
-	mvprintw(Y_OFFSET + Y_HEIGHT, X_OFFSET*2, "+--------------------+");	
-
-	bucket bu;
-	init_bucket(&bu);
-
-	//shape s;
-	new_shape(&s, &bu);
-
-	//hold shape
-	int h_s = -1;
-
-	board b = init_board();
-
-	thread_params tp;
-	tp.b = &b;
-	tp.s = &s;
-	tp.bucket = &bu;
-	tp.hold_cnt = &hold_cnt;
-	tp.drop_speed = &drop_speed;
-
-	pthread_t pth;
-    pthread_create(&pth, NULL, drop_loop, (void * ) &tp);
-
-	// game loop
-	// TODO - add DAS
-	while(1){
-
-		timeout(100);
-		int ch = getch();
-
-		draw_board(b);
-		
-		if(ch != ERR){
-
-			//hold - temporarily cycles trough
-			if(ch == 'x'){
-				s.type++;
-				if(s.type == 7)
-					s.type = 0;
-
-			//left
-			}else if(ch == KEY_LEFT && check_move(s, b, -1, 0, 0)){
-				s.x--;
-
-			//right
-			}else if(ch == KEY_RIGHT && check_move(s, b, 1, 0, 0)){
-				s.x++;
-
-			//rotate
-			}else if(ch == KEY_UP && check_move(s, b, 0, 0, 1)){
-				s.rotation++;
-				if(s.rotation == 4)
-					s.rotation = 0;
-
-			//hard drop
-			}else if(ch == ' '){
-				while(true){
-					if(!check_move(s, b, 0, 1, 0))
-						break;
-					s.y++;
-				}
-			//hold
-			}else if(ch == 'z' && hold_cnt < 1){
-				hold(&s, &h_s, &bu);
-				hold_cnt++;
-			//soft drop
-			}else if(ch == KEY_DOWN){
-				drop_speed = 100000;
-			}else{
-				drop_speed = 250000;
-			}
-		}
-
-		draw_hold(h_s, hold_cnt);
-
-		draw_shape(s);
-		draw_bucket(&bu);
-
-		//mvprintw(30, 2, "X %d\n", s.x);
-		//mvprintw(31, 2, "Y %d\n", s.y);
-
-		refresh();
-
-		if(DEBUG_CNT == 20)
-			DEBUG_CNT = 0;
-	}
-
-	while(1){
-		refresh();
-	}
-
-	endwin();
-}
+		}*/
