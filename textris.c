@@ -4,6 +4,10 @@
 #include <string.h>
 #include <pthread.h>
 #include <time.h>
+#include <menu.h>
+
+#define ARRAY_SIZE(a) (sizeof(a) / sizeof(a[0]))
+#define CTRLD 	4
 
 #define CHECK_BIT(var,pos) ((var) & (1<<(pos)))
 #define BIT_MAP(map)(*(map + 0))
@@ -22,6 +26,8 @@ typedef struct{
 typedef struct{
 	int xy[20][20];
 	int xy_col[10][20];
+	int width;
+	int height;
 } board;
 
 typedef struct{
@@ -53,10 +59,7 @@ char shape_bytes[7][4] = {
 
 int DEBUG_CNT = 0;
 
-int X_OFFSET = 10;
-int Y_OFFSET = 1;
-int X_WIDTH = 10;
-int Y_HEIGHT = 20;
+
 
 int BUCKET_OFFSET = 4;
 int HOLD_OFFSET = -6;
@@ -143,7 +146,7 @@ void h_border(int y, int x, int len){
 	mvprintw(y, x, str);
 }
 
-int draw_shape(shape s){
+int draw_shape(shape s, int board_x, int board_y){
 
 	int i, j;
 	int * map;
@@ -160,14 +163,17 @@ int draw_shape(shape s){
 
 			if(CHECK_BIT(shape_bytes[s.type][BYTE_MAP(map)], BIT_MAP(map))){
 
-				mvaddch(s.y + Y_MAP(map) + Y_OFFSET, ((s.x + X_MAP(map))*2)  + (X_OFFSET*2) + 1,  ' '|A_REVERSE);
-				mvaddch(s.y + Y_MAP(map) + Y_OFFSET, ((s.x + X_MAP(map))*2) + (X_OFFSET*2) + 2,  ' '|A_REVERSE);
+				mvaddch(s.y + Y_MAP(map) + board_y, ((s.x + X_MAP(map))*2)  + (board_x) + 1,  ' '|A_REVERSE);
+				mvaddch(s.y + Y_MAP(map) + board_y, ((s.x + X_MAP(map))*2) + (board_x) + 2,  ' '|A_REVERSE);
 
 				if(!in_array(s.y + Y_MAP(map), y_vals, 4)){
 					y_vals[height] = s.y + Y_MAP(map);
 					height++;
 				}
-			}
+			}/*else{
+				mvaddch(s.y + Y_MAP(map) + board_y, ((s.x + X_MAP(map))*2)  + (board_x*2) + 1,  'x');
+				mvaddch(s.y + Y_MAP(map) + board_y, ((s.x + X_MAP(map))*2) + (board_x*2) + 2,  'x');
+			}*/
 			
 		}
 	}
@@ -176,18 +182,18 @@ int draw_shape(shape s){
 	return height;
 }
 
-void draw_board(board b){
+void draw_board(board b, int board_x, int board_y){
 
 	int x, y;
 
 	for(x = 0; x < 10; x++){
 		for(y = 0; y < 20; y++){
 			if(b.xy[x][y] == 0){
-				mvprintw(y + Y_OFFSET, (x*2) + (X_OFFSET*2) + 1, "  ");
+				mvprintw(y + board_y, (x*2) + (board_x) + 1, "  ");
 			}else{
 				attron(COLOR_PAIR(b.xy[x][y]));
-				mvaddch(y + Y_OFFSET, (x*2) + (X_OFFSET*2) + 1, ' '|A_REVERSE);
-				mvaddch(y + Y_OFFSET, (x*2) + (X_OFFSET*2) + 2, ' '|A_REVERSE);
+				mvaddch(y + board_y, (x*2) + (board_x) + 1, ' '|A_REVERSE);
+				mvaddch(y + board_y, (x*2) + (board_x) + 2, ' '|A_REVERSE);
 				attroff(COLOR_PAIR(b.xy[x][y]));
 			}
 		}
@@ -216,9 +222,9 @@ int check_move(shape s, board b, int x_direction, int y_direction, int rotation)
 
 				//check board boundaries
 				if(	(s.x + X_MAP(map) + x_direction) < 0 || 
-					(s.x + X_MAP(map) + x_direction) > (X_WIDTH - 1) ||
+					(s.x + X_MAP(map) + x_direction) > (b.width - 1) ||
 					(s.y + Y_MAP(map) + y_direction) < 0 ||
-					(s.y + Y_MAP(map) + y_direction) > (Y_HEIGHT - 1)){
+					(s.y + Y_MAP(map) + y_direction) > (b.height - 1)){
 					return 0;
 				}
 
@@ -272,14 +278,14 @@ void refill_bucket(bucket * b){
 
 //TODO - eliminate most white space - only a single block between shapes 
 //     - maybe rotate them differently
-void draw_bucket(bucket * b){
+void draw_bucket(bucket * b, int bucket_x, int bucket_y){
 	
 	int i, j;
 	
 	//clear
 	for(i = 0; i < 4; i++){
 		for(j=0; j<4; j++){
-			mvprintw(i*4 + j, (X_WIDTH * 2) + (X_OFFSET * 2) + (BUCKET_OFFSET * 2) + 1, "        ");	
+			mvprintw(i*4 + j + bucket_y, bucket_x + 1, "        ");	
 		}	
 	}
 
@@ -288,17 +294,17 @@ void draw_bucket(bucket * b){
 		shape s;
 		s.rotation = 0;
 		s.type = b->bucket1[i];
-		s.x = X_WIDTH + BUCKET_OFFSET;
+		s.x = 0;
 		s.y = i*4;
 
-		draw_shape(s);
+		draw_shape(s, bucket_x, bucket_y);
 	}
 
 	//borders
-        v_border(Y_OFFSET, (X_OFFSET * 2) + (X_WIDTH * 2) + (BUCKET_OFFSET * 2) - 1, 4 * 4);
-        v_border(Y_OFFSET, (X_OFFSET * 2) + (X_WIDTH * 2) + (BUCKET_OFFSET * 2) + 10, 4 * 4);
-        h_border(Y_OFFSET, (X_OFFSET * 2) + (X_WIDTH * 2) + (BUCKET_OFFSET * 2) - 1, 12);
-        h_border(Y_OFFSET + (4 * 4) - 1, (X_OFFSET * 2) + (X_WIDTH * 2) + (BUCKET_OFFSET * 2) - 1, 12);
+    v_border(bucket_y, bucket_x - 1, 4 * 4);
+    v_border(bucket_y, bucket_x + 10, 4 * 4);
+    h_border(bucket_y, bucket_x - 1, 12);
+    h_border(bucket_y + (4 * 4) - 1, bucket_x - 1, 12);
 }
 
 void new_shape(shape * s, bucket * b){
@@ -316,8 +322,6 @@ void new_shape(shape * s, bucket * b){
 	for(i = 0; i < 13; i++)
 		b->bucket1[i] = b->bucket1[i+1];
 	b->bucket1[13] = -1;
-
-	//draw_bucket(b);
 }
 
 int add_to_board(shape s, board * b){
@@ -346,9 +350,11 @@ int add_to_board(shape s, board * b){
 	return 1;
 }
 
-board init_board(){
+board init_board(int board_width, int board_height){
 	board b;
-	memset(b.xy, 0, sizeof(b.xy[0][0]) * 20 * 10);
+	memset(b.xy, 0, sizeof(b.xy[0][0]) * board_width * board_height);
+	b.width = board_width;
+	b.height = board_height;
 	return b;
 }
 
@@ -414,27 +420,28 @@ int check_lines(board * b){
 	return row_cnt;
 }
 
-void draw_hold(int h_s, int hold_cnt){
+void draw_hold(int h_s, int hold_cnt, hold_x, hold_y){
 
 	int j;
 	
-	h_border(Y_OFFSET - 1, (X_OFFSET * 2) + (HOLD_OFFSET * 2), 10);
-	h_border(Y_OFFSET + 4, (X_OFFSET * 2) + (HOLD_OFFSET * 2), 10);
-	v_border(Y_OFFSET - 1, (X_OFFSET * 2) + (HOLD_OFFSET * 2), 6);
-	v_border(Y_OFFSET - 1, (X_OFFSET * 2) + (HOLD_OFFSET * 2) + 9, 6);
+	h_border(hold_y, hold_x, 10);
+	h_border(hold_y + 5, hold_x, 10);
+	v_border(hold_y, hold_x, 6);
+	v_border(hold_y, hold_x + 9, 6);
 
 	//clear
 	for(j=0; j<4; j++)
-		mvprintw(j + Y_OFFSET, (X_OFFSET * 2) + (HOLD_OFFSET * 2) + 1, "        ");	
+		mvprintw(j + hold_y + 1, hold_x + 1, "        ");	
 
 	if(h_s != -1){
 		shape s;
 		s.type = h_s;
 		s.rotation = 0;
-		s.x = HOLD_OFFSET;
-		s.y = 0;
+		s.x = 0;
+		s.y = 1;
 
-		draw_shape(s);
+		draw_shape(s, hold_x, hold_y);
+
 	}
 }
 
@@ -509,18 +516,25 @@ void drop_speed_fast(){
 }
 
 double twenty_lines(){
-	//initialise boarders
+
+	clear();
+
+	int board_x = 15;
+	int board_y = 1;
+	int board_width = 10;
+	int board_height = 20;
+
+	//board boarders
 	int i;
-	for(i = 0; i < Y_HEIGHT; i++){
-		mvprintw(i + Y_OFFSET, (X_OFFSET * 2), "|");
-		mvprintw(i + Y_OFFSET, (X_WIDTH * 2) + (X_OFFSET * 2) + 1, "| %d", i);
+	for(i = 0; i < board_height; i++){
+		mvprintw(i + board_y, board_x, "|");
+		mvprintw(i + board_y, (board_width * 2) + (board_x) + 1, "|", i);
 	}
 
-	for(i = 0; i < (X_WIDTH * 2) + 1; i++){
-		mvprintw(Y_OFFSET + Y_HEIGHT, i + (X_OFFSET*2), "_");	
-	}
-
-	mvprintw(Y_OFFSET + Y_HEIGHT, X_OFFSET*2, "+--------------------+");	
+	mvprintw(board_y + board_height, board_x, "+");	
+	for(i = 1; i < (board_width * 2) + 1; i++)
+		mvprintw(board_y + board_height, i + board_x, "-");	
+	mvprintw(board_y + board_height, board_x + (board_width * 2) + 1, "+");	
 
 	//bucket
 	init_bucket(&bu);
@@ -529,7 +543,7 @@ double twenty_lines(){
 	new_shape(&s, &bu);
 
 	//board
-	b = init_board();
+	b = init_board(board_width, board_height);
 
 	int running = 1;
 	int lines = 0;
@@ -550,14 +564,51 @@ double twenty_lines(){
     time_t start = time(NULL);
 
 	// game loop
-	while(running > 0 && lines < 4){
+	while(running > 0 && lines < 20){
 
 		timeout(100);
 
-		draw_board(b);
-		draw_hold(h_s, hold_cnt);
-		draw_shape(s);
-		draw_bucket(&bu);
+		draw_board(b, board_x, board_y);
+		draw_hold(h_s, hold_cnt, 1, 1);
+		draw_shape(s, board_x, board_y);
+		draw_bucket(&bu, 45, 1);
+
+		int ch = getch();
+		if(ch != ERR){
+
+			//hold - temporarily cycles trough
+			if(ch == 'x'){
+				s.type++;
+				if(s.type == 7)
+					s.type = 0;
+
+			//left
+			}else if(ch == KEY_LEFT && check_move(s, b, -1, 0, 0)){
+				s.x--;
+
+			//right
+			}else if(ch == KEY_RIGHT && check_move(s, b, 1, 0, 0)){
+				s.x++;
+
+			//rotate
+			}else if(ch == KEY_UP && check_move(s, b, 0, 0, 1)){
+				s.rotation++;
+				if(s.rotation == 4)
+					s.rotation = 0;
+
+			//hard drop
+			}else if(ch == ' '){
+				while(true){
+					if(!check_move(s, b, 0, 1, 0))
+						break;
+					s.y++;
+				}
+			//hold
+			}else if(ch == 'z' && hold_cnt < 1){
+				hold(&s, &h_s, &bu);
+				hold_cnt++;
+			}
+		}
 
 		refresh();
 
@@ -575,6 +626,8 @@ double twenty_lines(){
 
 	return difftime(time(NULL), start);
 }
+
+void print_in_middle(WINDOW *win, int starty, int startx, int width, char *string, chtype color);
 
 void textris(){
 	int score = 0;
@@ -598,16 +651,120 @@ void textris(){
 	init_pair(6, COLOR_CYAN, COLOR_BLACK);
 	init_pair(7, COLOR_MAGENTA, COLOR_BLACK);
 
-	//menu goes here - need to control via python too ??
+	//menu
 
-	double res = twenty_lines();
+	int MENU_WIDTH = 20;
+	int SCREEN_WIDTH = 100;
 
-	while(1){
+	char *choices[] = {
+                        "20 Lines",
+                        "40 Lines",
+                        "Classic",
+                        "Read Me",
+                        "Exit",
+                  };
+
+	ITEM **my_items;
+	int c;				
+	MENU *my_menu;
+	int n_choices, i;
+	ITEM *cur_item;
+	WINDOW *my_menu_win;
+
+	n_choices = ARRAY_SIZE(choices);
+	my_items = (ITEM **)calloc(n_choices + 1, sizeof(ITEM *));
+
+	for(i = 0; i < n_choices; ++i)
+	        my_items[i] = new_item(choices[i], "");
+	my_items[n_choices] = (ITEM *)NULL;
+
+	my_menu = new_menu((ITEM **)my_items);
+
+	/* Create the window to be associated with the menu */
+	my_menu_win = newwin(10, MENU_WIDTH + 2, 5, (SCREEN_WIDTH/2) - (MENU_WIDTH/2));
+	keypad(my_menu_win, TRUE);
+
+	/* Set main window and sub window */
+	set_menu_win(my_menu, my_menu_win);
+	set_menu_sub(my_menu, derwin(my_menu_win, 6, MENU_WIDTH, 3, 1)); //must be less than window
+
+	/* Set menu mark to the string " * " */
+	set_menu_mark(my_menu, " * ");
+
+	/* Print a border around the main window and print a title */
+	box(my_menu_win, 0, 0);
+
+	print_in_middle(my_menu_win, 1, 0, MENU_WIDTH, "Game mode", COLOR_PAIR(0));
+	mvwaddch(my_menu_win, 2, 0, ACS_LTEE);
+	mvwhline(my_menu_win, 2, 1, ACS_HLINE, MENU_WIDTH);
+	mvwaddch(my_menu_win, 2, MENU_WIDTH + 1, ACS_RTEE);
+	mvprintw(3, (SCREEN_WIDTH/2) - (36/2), "textris - An ASCII based Tetris game");
+	
+	//decorative shapes
+	for(i =0; i<7; i++){
+		shape s;
+		s.rotation = 0;
+		s.type = i;
+		s.x = 0;
+		s.y = 0;
+		draw_shape(s, (i*10) + (SCREEN_WIDTH/2) - ((10*7)/2), 15);
+	}
+
+	post_menu(my_menu);
+	wrefresh(my_menu_win);
+
+	refresh();
+
+	while((c = wgetch(my_menu_win)) != KEY_F(1))
+	{   switch(c)
+	    {	case KEY_DOWN:
+		        menu_driver(my_menu, REQ_DOWN_ITEM);
+				break;
+			case KEY_UP:
+				menu_driver(my_menu, REQ_UP_ITEM);
+				break;
+			case KEY_LEFT:
+				twenty_lines();
+				break;
+		}
+	}	
+
+	free_item(my_items[0]);
+	free_item(my_items[1]);
+	free_menu(my_menu);
+	endwin();
+
+	//double res = twenty_lines();
+
+	/*while(1){
 		mvprintw(0, 0, "20 lines cleared in %f seconds", res);
 		refresh();
 	}
 
-	endwin();
+	endwin();*/
+}
+
+void print_in_middle(WINDOW *win, int starty, int startx, int width, char *string, chtype color)
+{	int length, x, y;
+	float temp;
+
+	if(win == NULL)
+		win = stdscr;
+	getyx(win, y, x);
+	if(startx != 0)
+		x = startx;
+	if(starty != 0)
+		y = starty;
+	if(width == 0)
+		width = 80;
+
+	length = strlen(string);
+	temp = (width - length)/ 2;
+	x = startx + (int)temp;
+	wattron(win, color);
+	mvwprintw(win, y, x, "%s", string);
+	wattroff(win, color);
+	refresh();
 }
 
 int main(){  
