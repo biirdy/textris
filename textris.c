@@ -4,6 +4,7 @@
 #include <string.h>
 #include <pthread.h>
 #include <time.h>
+#include <sys/time.h>
 #include <menu.h>
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof(a[0]))
@@ -305,6 +306,7 @@ void draw_bucket(bucket * b, int bucket_x, int bucket_y){
     v_border(bucket_y, bucket_x + 10, 4 * 4);
     h_border(bucket_y, bucket_x - 1, 12);
     h_border(bucket_y + (4 * 4) - 1, bucket_x - 1, 12);
+    mvprintw(bucket_y + (4 * 4), bucket_x, "   Next");	
 }
 
 void new_shape(shape * s, bucket * b){
@@ -428,6 +430,7 @@ void draw_hold(int h_s, int hold_cnt, hold_x, hold_y){
 	h_border(hold_y + 5, hold_x, 10);
 	v_border(hold_y, hold_x, 6);
 	v_border(hold_y, hold_x + 9, 6);
+	mvprintw(hold_y + 6, hold_x, "   Hold");
 
 	//clear
 	for(j=0; j<4; j++)
@@ -561,10 +564,13 @@ double twenty_lines(){
 	pthread_t pth;
     pthread_create(&pth, NULL, drop_loop, (void * ) &tp);
 
-    time_t start = time(NULL);
+    struct timeval tval_before, tval_after, tval_result;
+    gettimeofday(&tval_before, NULL);
+
+   	char tmbuf[64];
 
 	// game loop
-	while(running > 0 && lines < 20){
+	while(running > 0 && lines < 10){
 
 		timeout(100);
 
@@ -572,6 +578,14 @@ double twenty_lines(){
 		draw_hold(h_s, hold_cnt, 1, 1);
 		draw_shape(s, board_x, board_y);
 		draw_bucket(&bu, 45, 1);
+
+		mvprintw(10, 2, "Lines: %d", lines);
+
+		gettimeofday(&tval_after, NULL);
+		timersub(&tval_after, &tval_before, &tval_result);
+		strftime(tmbuf, sizeof tmbuf, "%M:%S", localtime(&tval_result.tv_sec));
+		mvprintw(14, 2, "        ");
+		mvprintw(14, 2, "%s.%02d", tmbuf, tval_result.tv_usec/10000);
 
 		int ch = getch();
 		if(ch != ERR){
@@ -624,10 +638,41 @@ double twenty_lines(){
 
 	clear();
 
-	return difftime(time(NULL), start);
+	return 1;
 }
 
 void print_in_middle(WINDOW *win, int starty, int startx, int width, char *string, chtype color);
+
+void draw_menu(WINDOW *win, MENU *menu){
+
+	int i;
+
+	int MENU_WIDTH = 20;
+	int SCREEN_WIDTH = 100;
+
+	clear();
+
+	/* Print a border around the main window and print a title */
+	box(win, 0, 0);
+
+	print_in_middle(win, 1, 0, MENU_WIDTH, "Game mode", COLOR_PAIR(0));
+	mvwaddch(win, 2, 0, ACS_LTEE);
+	mvwhline(win, 2, 1, ACS_HLINE, MENU_WIDTH);
+	mvwaddch(win, 2, MENU_WIDTH + 1, ACS_RTEE);
+	mvprintw(3, (SCREEN_WIDTH/2) - (36/2), "textris - An ASCII based Tetris game");
+
+	//decorative shapes
+	for(i =0; i<7; i++){
+		shape s;
+		s.rotation = 0;
+		s.type = i;
+		s.x = 0;
+		s.y = 0;
+		draw_shape(s, (i*10) + (SCREEN_WIDTH/2) - ((10*7)/2), 15);
+	}
+	wrefresh(win);
+	refresh();
+}
 
 void textris(){
 	int score = 0;
@@ -664,74 +709,57 @@ void textris(){
                         "Exit",
                   };
 
-	ITEM **my_items;
+	ITEM **menu_items;
 	int c;				
-	MENU *my_menu;
+	MENU *menu;
 	int n_choices, i;
 	ITEM *cur_item;
-	WINDOW *my_menu_win;
+	WINDOW *menu_win;
 
 	n_choices = ARRAY_SIZE(choices);
-	my_items = (ITEM **)calloc(n_choices + 1, sizeof(ITEM *));
+	menu_items = (ITEM **)calloc(n_choices + 1, sizeof(ITEM *));
 
 	for(i = 0; i < n_choices; ++i)
-	        my_items[i] = new_item(choices[i], "");
-	my_items[n_choices] = (ITEM *)NULL;
+	        menu_items[i] = new_item(choices[i], "");
+	menu_items[n_choices] = (ITEM *)NULL;
 
-	my_menu = new_menu((ITEM **)my_items);
+	menu = new_menu((ITEM **)menu_items);
 
 	/* Create the window to be associated with the menu */
-	my_menu_win = newwin(10, MENU_WIDTH + 2, 5, (SCREEN_WIDTH/2) - (MENU_WIDTH/2));
-	keypad(my_menu_win, TRUE);
+	menu_win = newwin(10, MENU_WIDTH + 2, 5, (SCREEN_WIDTH/2) - (MENU_WIDTH/2));
+	keypad(menu_win, TRUE);
 
 	/* Set main window and sub window */
-	set_menu_win(my_menu, my_menu_win);
-	set_menu_sub(my_menu, derwin(my_menu_win, 6, MENU_WIDTH, 3, 1)); //must be less than window
+	set_menu_win(menu, menu_win);
+	set_menu_sub(menu, derwin(menu_win, 6, MENU_WIDTH, 3, 1)); //must be less than window
 
 	/* Set menu mark to the string " * " */
-	set_menu_mark(my_menu, " * ");
+	set_menu_mark(menu, " * ");
+	post_menu(menu);
+	wrefresh(menu_win);
 
-	/* Print a border around the main window and print a title */
-	box(my_menu_win, 0, 0);
-
-	print_in_middle(my_menu_win, 1, 0, MENU_WIDTH, "Game mode", COLOR_PAIR(0));
-	mvwaddch(my_menu_win, 2, 0, ACS_LTEE);
-	mvwhline(my_menu_win, 2, 1, ACS_HLINE, MENU_WIDTH);
-	mvwaddch(my_menu_win, 2, MENU_WIDTH + 1, ACS_RTEE);
-	mvprintw(3, (SCREEN_WIDTH/2) - (36/2), "textris - An ASCII based Tetris game");
-	
-	//decorative shapes
-	for(i =0; i<7; i++){
-		shape s;
-		s.rotation = 0;
-		s.type = i;
-		s.x = 0;
-		s.y = 0;
-		draw_shape(s, (i*10) + (SCREEN_WIDTH/2) - ((10*7)/2), 15);
-	}
-
-	post_menu(my_menu);
-	wrefresh(my_menu_win);
+	draw_menu(menu_win, menu);
 
 	refresh();
 
-	while((c = wgetch(my_menu_win)) != KEY_F(1))
+	while((c = wgetch(menu_win)) != KEY_F(1))
 	{   switch(c)
 	    {	case KEY_DOWN:
-		        menu_driver(my_menu, REQ_DOWN_ITEM);
+		        menu_driver(menu, REQ_DOWN_ITEM);
 				break;
 			case KEY_UP:
-				menu_driver(my_menu, REQ_UP_ITEM);
+				menu_driver(menu, REQ_UP_ITEM);
 				break;
 			case KEY_LEFT:
 				twenty_lines();
+				draw_menu(menu_win, menu);
 				break;
 		}
 	}	
 
-	free_item(my_items[0]);
-	free_item(my_items[1]);
-	free_menu(my_menu);
+	for(i = 0; i < n_choices; ++i)
+		free_item(menu_items[i]);
+	free_menu(menu);
 	endwin();
 
 	//double res = twenty_lines();
